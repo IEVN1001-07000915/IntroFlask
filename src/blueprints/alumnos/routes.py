@@ -1,37 +1,154 @@
 from flask import Blueprint, jsonify, request
-    from database import MySQL
-    maestros_bp =Blueprint('alumnos',__name__,url_prefix='/app/alumnos')
+from database import mysql
+
+alumnos_bp = Blueprint(
+    'alumnos',
+    __name__,
+    url_prefix='/api/alumnos'
+)
 
 def fila_a_diccionario(cursor, fila):
-    columnas = [culumna[0] for columna in  cursor.description]
+    columnas = [columna[0] for columna in cursor.description]
     return dict(zip(columnas, fila))
 
-# GET: consultar todos los alumnos
-@alumnos_bp.routes('', methods=['GET'])
+def leer_alumno_bd(matricula):
+    try:
+        cursor = mysql.connection.cursor()
+        sql = "SELECT * FROM alumnos WHERE matricula = %s"
+        cursor.execute(sql, (matricula,))
+        datos = cursor.fetchone()
+        
+        if datos != None:
+            alumno = {
+                "matricula": datos[0], 
+                "nombre": datos[1],
+                "apaterno": datos[2], 
+                "amaterno": datos[3], 
+                "correo": datos[4]
+            }
+            return alumno
+        else:
+            return None
+    except Exception as ex:
+        raise ex
+
+# GET: Consultar todos los alumnos
+@alumnos_bp.route('/', methods=['GET'])
 def lista_alumnos():
     cursor = None
-
     try:
-        cursor = mysql.connetion.cursor()
-        cursor.execute("""SELECT matricula, nombre, apaterno, amaterno, correo""")
-
+        cursor = mysql.connection.cursor()
+        cursor.execute("""
+            SELECT matricula, nombre, apaterno, amaterno, correo
+            FROM alumnos
+        """)
         datos = cursor.fetchall()
-        alumnos = [fila_a_diccionario(cursor, fila) for fila in datos]
-
+        alumnos = [
+            fila_a_diccionario(cursor, fila)
+            for fila in datos
+        ]
         return jsonify({
-            'alumnos':alumnos,
+            'alumnos': alumnos,
             'mensaje': 'Lista de alumnos',
             'exito': True
         }), 200
 
-    except Exception:
+    except Exception as ex:
         return jsonify({
-            'mensaje': 'Error al consultar los alumnos','exito': False
+            'mensaje': f'Error al consultar los alumnos: {ex}',
+            'exito': False
         }), 500
 
-        finally:
-            if cursor is not None:
-                cursor.close()
+    finally:
+        if cursor is not None:
+            cursor.close()
 
-# GET: consultar un alumno por matricula
-@alumnos_bp.route('/<string:matricula>', methods={'GET'})
+# GET: Consultar un alumno por matrícula
+@alumnos_bp.route('/<mat>', methods=['GET'])
+def leer_alumno(mat):
+    try:
+        alumno = leer_alumno_bd(mat)
+        if alumno != None:
+            return jsonify({
+                'alumno': alumno,
+                'mensaje': 'Alumno encontrado', 
+                'exito': True
+            })
+        else:
+            return jsonify({
+                'alumno': alumno, 
+                'mensaje': 'Alumno no encontrado', 
+                'exito': False
+            })
+    except Exception as ex:
+        return jsonify({
+            'message': f"error {ex}",
+            'exito': False
+        })
+
+# POST: Registrar un alumno
+@alumnos_bp.route('/', methods=['POST'])
+def registrar_alumno():
+    try:
+        alumno = leer_alumno_bd(request.json['matricula'])
+        if alumno != None:
+            return jsonify({
+                'mensaje': 'Alumno ya existente, no se puede registrar', 
+                'exito': False
+            })
+        else:
+            cursor = mysql.connection.cursor()
+            sql = """INSERT INTO alumnos (matricula, nombre, apaterno, amaterno, correo)
+                     VALUES (%s, %s, %s, %s, %s)"""
+            cursor.execute(sql, (
+                request.json['matricula'],
+                request.json['nombre'],
+                request.json['apaterno'],
+                request.json['amaterno'],
+                request.json['correo']
+            ))
+            mysql.connection.commit()
+            return jsonify({'mensaje': "Alumno registrado", 'exito': True})
+
+    except Exception as ex:
+        return jsonify({'message': f"error {ex}", 'exito': False})
+
+# PUT: Actualizar un alumno
+@alumnos_bp.route('/<mat>', methods=['PUT'])
+def actualizar_curso(mat):
+    try:
+        alumno = leer_alumno_bd(mat)
+        if alumno != None:
+            cursor = mysql.connection.cursor()
+            sql = """UPDATE alumnos SET nombre = %s,
+                     apaterno = %s, amaterno = %s, correo = %s
+                     WHERE matricula = %s"""
+            cursor.execute(sql, (
+                request.json['nombre'],     
+                request.json['apaterno'],
+                request.json['amaterno'],
+                request.json['correo'],
+                mat
+            ))
+            mysql.connection.commit()
+            return jsonify({'mensaje': "Alumno actualizado.", 'exito': True})
+        else:
+            return jsonify({'mensaje': "Alumno no encontrado.", 'exito': False})
+    except Exception as ex:
+        return jsonify({'mensaje': f"Error {ex}", 'exito': False})
+
+# DELETE: Eliminar un alumno
+@alumnos_bp.route('/<mat>', methods=['DELETE'])
+def eliminar_alumno(mat):
+    try:
+        alumno = leer_alumno_bd(mat)
+        if alumno != None:
+            cursor = mysql.connection.cursor()
+            sql = "DELETE FROM alumnos WHERE matricula = %s"
+            cursor.execute(sql, (mat,))
+            mysql.connection.commit()
+            return jsonify({'mensaje': "Alumno eliminado", 'exito': True})
+        else:
+            return jsonify({'mensaje': "Alumno no encontrado para eliminar", 'exito': False})
+    except Exception as ex:
+        return jsonify({'mensaje': f"Error: {ex}", 'exito': False})
